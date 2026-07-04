@@ -1,0 +1,11 @@
+CREATE ROLE crm_app
+  LOGIN
+  PASSWORD 'local-dev-only-change-me'
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT;
+
+GRANT CONNECT ON DATABASE crm TO crm_app;
+GRANT USAGE ON SCHEMA public TO crm_app;
+
