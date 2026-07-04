@@ -14,7 +14,7 @@ Los elementos solo se marcan como completados cuando tienen implementación y va
 - [x] Compilación, typecheck y pruebas locales sin base de datos.
 - [x] Ejecutar migraciones sobre PostgreSQL real.
 - [x] Pruebas de aislamiento RLS contra una base real.
-- [ ] Contenedores de API y frontend.
+- [x] Contenedores de API y frontend.
 - [ ] Infraestructura y despliegue en Oracle Cloud.
 
 Docker Desktop y PostgreSQL 16 están operativos localmente.
@@ -69,5 +69,6 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] Evaluación independiente del diseño: `PASS`.
 - [x] Pruebas con PostgreSQL y Docker.
 - [x] Prueba end-to-end de empresa, sesión y clientes.
+- [x] Stack Docker completo y migraciones idempotentes.
 - [ ] Auditoría de seguridad previa a producción.
 
