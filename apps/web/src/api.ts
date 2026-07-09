@@ -5,6 +5,8 @@ export type Session = {
   expiresIn: string;
 };
 
+export type AcquisitionChannel = 'instagram' | 'whatsapp' | 'facebook' | 'otro';
+
 export type ApiCustomer = {
   id: string;
   firstName: string;
@@ -12,10 +14,24 @@ export type ApiCustomer = {
   email: string | null;
   phone: string | null;
   country: string | null;
-  acquisitionChannel: 'instagram' | 'whatsapp' | 'facebook' | 'otro';
+  instagramHandle?: string | null;
+  facebookHandle?: string | null;
+  acquisitionChannel: AcquisitionChannel;
   paymentAlertsEnabled: boolean;
   marketingConsentAt: string | null;
   createdAt: string;
+  updatedAt?: string;
+};
+
+export type CreateCustomerInput = {
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  phone?: string | null;
+  country?: string | null;
+  acquisitionChannel: AcquisitionChannel;
+  paymentAlertsEnabled?: boolean;
+  marketingConsent?: boolean;
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -30,7 +46,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const payload = await response.json().catch(() => null) as { message?: string } | null;
     throw new Error(payload?.message ?? `Error HTTP ${response.status}`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+function authHeaders(session: Session) {
+  return { authorization: `Bearer ${session.accessToken}` };
 }
 
 export function loginWithPassword(input: { companySlug: string; email: string; password: string }): Promise<Omit<Session, 'companySlug'>> {
@@ -38,5 +59,9 @@ export function loginWithPassword(input: { companySlug: string; email: string; p
 }
 
 export function fetchCustomers(session: Session): Promise<ApiCustomer[]> {
-  return request('/api/customers', { headers: { authorization: `Bearer ${session.accessToken}` } });
+  return request('/api/customers', { headers: authHeaders(session) });
+}
+
+export function createCustomer(session: Session, input: CreateCustomerInput): Promise<ApiCustomer> {
+  return request('/api/customers', { method: 'POST', headers: authHeaders(session), body: JSON.stringify(input) });
 }
