@@ -34,6 +34,8 @@ export type CreateCustomerInput = {
   marketingConsent?: boolean;
 };
 
+export type UpdateCustomerInput = Partial<CreateCustomerInput>;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -64,4 +66,12 @@ export function fetchCustomers(session: Session): Promise<ApiCustomer[]> {
 
 export function createCustomer(session: Session, input: CreateCustomerInput): Promise<ApiCustomer> {
   return request('/api/customers', { method: 'POST', headers: authHeaders(session), body: JSON.stringify(input) });
+}
+
+export function updateCustomer(session: Session, id: string, input: UpdateCustomerInput): Promise<ApiCustomer> {
+  return request(`/api/customers/${id}`, { method: 'PATCH', headers: authHeaders(session), body: JSON.stringify(input) });
+}
+
+export function deleteCustomer(session: Session, id: string): Promise<void> {
+  return request(`/api/customers/${id}`, { method: 'DELETE', headers: authHeaders(session) });
 }

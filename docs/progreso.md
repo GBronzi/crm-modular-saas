@@ -45,8 +45,9 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] CRUD API completo de clientes y eliminación lógica.
 - [x] Integración inicial del dashboard/listado de clientes con `/api/customers`.
 - [x] Crear clientes desde el frontend con formulario conectado a /api/customers.
-- [ ] Editar y eliminar clientes desde la interfaz.
-- [ ] Ficha lateral: General, Financiero y Bitácora.
+- [x] Editar y eliminar clientes desde la interfaz.
+- [x] Ficha lateral básica de cliente: datos generales y acciones.
+- [ ] Ficha lateral financiera y bitácora completa.
 - [ ] Ventas, cuotas, pagos parciales y cálculo de saldos.
 - [ ] Alertas reales de vencimiento y toggle por cliente.
 - [ ] Pruebas financieras y de concurrencia.
@@ -70,6 +71,7 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] Dos pruebas de esquemas de usuarios.
 - [x] Dos pruebas de esquemas de clientes.
 - [x] Build de producción de API y frontend.
+- [x] Build de frontend con ficha lateral, edición y eliminación de clientes.
 - [x] Evaluación independiente del diseño: `PASS`.
 - [x] Pruebas con PostgreSQL y Docker.
 - [x] Prueba end-to-end de empresa, sesión y clientes.
@@ -77,4 +79,3 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] Prueba end-to-end de administración de usuarios: maestro crea usuario y colaborador recibe 403 en `/users`.
 - [x] Stack Docker completo y migraciones idempotentes.
 - [ ] Auditoría de seguridad previa a producción.
-

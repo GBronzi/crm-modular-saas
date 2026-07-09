@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collections, customers as demoCustomers, notes, type Alert } from './data';
-import { createCustomer, fetchCustomers, loginWithPassword, type AcquisitionChannel, type ApiCustomer, type CreateCustomerInput, type Session } from './api';
+import { createCustomer, deleteCustomer, fetchCustomers, loginWithPassword, updateCustomer, type AcquisitionChannel, type ApiCustomer, type CreateCustomerInput, type Session } from './api';
 
 const Icon = ({ children }: { children: string }) => <span className="nav-icon" aria-hidden="true">{children}</span>;
 
@@ -14,6 +14,7 @@ type CustomerRow = {
   due: string;
   alert: Alert;
   initials: string;
+  apiCustomer?: ApiCustomer;
 };
 
 type CustomerFormState = {
@@ -53,10 +54,24 @@ function toCustomerRow(customer: ApiCustomer): CustomerRow {
     due: 'Sin venta activa',
     alert: 'Al día',
     initials: initials(customer.firstName, customer.lastName),
+    apiCustomer: customer,
   };
 }
 
-function toCreateCustomerInput(form: CustomerFormState): CreateCustomerInput {
+function toFormState(customer: ApiCustomer): CustomerFormState {
+  return {
+    firstName: customer.firstName,
+    lastName: customer.lastName,
+    email: customer.email ?? '',
+    phone: customer.phone ?? '',
+    country: customer.country ?? '',
+    acquisitionChannel: customer.acquisitionChannel,
+    paymentAlertsEnabled: customer.paymentAlertsEnabled,
+    marketingConsent: Boolean(customer.marketingConsentAt),
+  };
+}
+
+function toCustomerInput(form: CustomerFormState): CreateCustomerInput {
   return {
     firstName: form.firstName,
     lastName: form.lastName,
@@ -145,8 +160,8 @@ function StatusBadge({ status }: { status: Alert }) {
   return <span className={`status ${status === 'Vencido' ? 'late' : status === 'Hoy' ? 'today' : 'ok'}`}><i/>{status}</span>;
 }
 
-function CustomerForm({ busy, error, onCancel, onSubmit }: { busy: boolean; error: string | null; onCancel: () => void; onSubmit: (value: CustomerFormState) => void }) {
-  const [form, setForm] = useState<CustomerFormState>(emptyCustomerForm);
+function CustomerForm({ busy, error, initialValue, mode, onCancel, onSubmit }: { busy: boolean; error: string | null; initialValue?: CustomerFormState; mode: 'create' | 'edit'; onCancel: () => void; onSubmit: (value: CustomerFormState) => void }) {
+  const [form, setForm] = useState<CustomerFormState>(initialValue ?? emptyCustomerForm);
   const update = <K extends keyof CustomerFormState>(key: K, value: CustomerFormState[K]) => setForm(current => ({ ...current, [key]: value }));
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -154,7 +169,7 @@ function CustomerForm({ busy, error, onCancel, onSubmit }: { busy: boolean; erro
   };
   return <div className="modal-backdrop" role="presentation">
     <form className="customer-form" aria-labelledby="customer-form-title" onSubmit={submit}>
-      <div className="section-title compact"><div><p className="eyebrow">Nuevo registro</p><h2 id="customer-form-title">Crear cliente</h2></div><button type="button" className="text-button" onClick={onCancel}>Cerrar</button></div>
+      <div className="section-title compact"><div><p className="eyebrow">{mode === 'create' ? 'Nuevo registro' : 'Actualizar registro'}</p><h2 id="customer-form-title">{mode === 'create' ? 'Crear cliente' : 'Editar cliente'}</h2></div><button type="button" className="text-button" onClick={onCancel}>Cerrar</button></div>
       <div className="form-grid">
         <label>Nombre<input value={form.firstName} onChange={event => update('firstName', event.target.value)} required /></label>
         <label>Apellido<input value={form.lastName} onChange={event => update('lastName', event.target.value)} required /></label>
@@ -165,27 +180,48 @@ function CustomerForm({ busy, error, onCancel, onSubmit }: { busy: boolean; erro
       </div>
       <div className="form-options"><label className="check"><input type="checkbox" checked={form.paymentAlertsEnabled} onChange={event => update('paymentAlertsEnabled', event.target.checked)}/> Alertas de cobro</label><label className="check"><input type="checkbox" checked={form.marketingConsent} onChange={event => update('marketingConsent', event.target.checked)}/> Consentimiento marketing</label></div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary login-button" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cliente'}<span aria-hidden="true">→</span></button>
+      <button className="primary login-button" disabled={busy}>{busy ? 'Guardando…' : mode === 'create' ? 'Guardar cliente' : 'Guardar cambios'}<span aria-hidden="true">→</span></button>
     </form>
   </div>;
 }
 
+function CustomerDrawer({ customer, busy, error, onClose, onDelete, onEdit }: { customer: ApiCustomer; busy: boolean; error: string | null; onClose: () => void; onDelete: () => void; onEdit: () => void }) {
+  return <aside className="customer-drawer" aria-label="Ficha del cliente">
+    <div className="section-title compact"><div><p className="eyebrow">Ficha lateral</p><h2>{customer.firstName} {customer.lastName}</h2></div><button type="button" className="text-button" onClick={onClose}>Cerrar</button></div>
+    <dl className="customer-details">
+      <div><dt>Email</dt><dd>{customer.email ?? 'Sin email'}</dd></div>
+      <div><dt>Teléfono</dt><dd>{customer.phone ?? 'Sin teléfono'}</dd></div>
+      <div><dt>País</dt><dd>{customer.country ?? 'Sin país'}</dd></div>
+      <div><dt>Canal</dt><dd>{customer.acquisitionChannel}</dd></div>
+      <div><dt>Alertas de cobro</dt><dd>{customer.paymentAlertsEnabled ? 'Activas' : 'Desactivadas'}</dd></div>
+      <div><dt>Marketing</dt><dd>{customer.marketingConsentAt ? 'Consentido' : 'Sin consentimiento'}</dd></div>
+    </dl>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="drawer-actions"><button className="secondary" onClick={onEdit} disabled={busy}>Editar cliente</button><button className="danger-button" onClick={onDelete} disabled={busy}>{busy ? 'Eliminando…' : 'Eliminar'}</button></div>
+  </aside>;
+}
+
 function Dashboard({ onLogout, session }: { onLogout: () => void; session: Session }) {
   const [query, setQuery] = useState('');
-  const [showCustomerForm, setShowCustomerForm] = useState(false);
-  const [apiCustomers, setApiCustomers] = useState<CustomerRow[]>([]);
+  const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
+  const [apiCustomers, setApiCustomers] = useState<ApiCustomer[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [savingCustomer, setSavingCustomer] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const selectedCustomer = apiCustomers.find(customer => customer.id === selectedCustomerId) ?? null;
 
   const loadCustomers = useCallback(async () => {
     setLoadingCustomers(true);
     setCustomerError(null);
     try {
       const rows = await fetchCustomers(session);
-      setApiCustomers(rows.map(toCustomerRow));
+      setApiCustomers(rows);
     } catch (err) {
       setCustomerError(err instanceof Error ? err.message : 'No se pudieron cargar clientes');
     } finally {
@@ -206,13 +242,30 @@ function Dashboard({ onLogout, session }: { onLogout: () => void; session: Sessi
 
   useEffect(() => { void loadCustomers(); }, [loadCustomers]);
 
+  const openCreateForm = () => {
+    setFormError(null);
+    setFormMode('create');
+  };
+
+  const openEditForm = () => {
+    setFormError(null);
+    setFormMode('edit');
+  };
+
   const saveCustomer = async (value: CustomerFormState) => {
     setSavingCustomer(true);
     setFormError(null);
     try {
-      const created = await createCustomer(session, toCreateCustomerInput(value));
-      setApiCustomers(current => [toCustomerRow(created), ...current]);
-      setShowCustomerForm(false);
+      if (formMode === 'edit' && selectedCustomer) {
+        const updated = await updateCustomer(session, selectedCustomer.id, toCustomerInput(value));
+        setApiCustomers(current => current.map(customer => customer.id === updated.id ? updated : customer));
+        setSelectedCustomerId(updated.id);
+      } else {
+        const created = await createCustomer(session, toCustomerInput(value));
+        setApiCustomers(current => [created, ...current]);
+        setSelectedCustomerId(created.id);
+      }
+      setFormMode(null);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'No se pudo guardar el cliente');
     } finally {
@@ -220,35 +273,54 @@ function Dashboard({ onLogout, session }: { onLogout: () => void; session: Sessi
     }
   };
 
+  const removeSelectedCustomer = async () => {
+    if (!selectedCustomer) return;
+    if (!window.confirm(`Eliminar lógicamente a ${selectedCustomer.firstName} ${selectedCustomer.lastName}?`)) return;
+    setDeletingCustomer(true);
+    setDrawerError(null);
+    try {
+      await deleteCustomer(session, selectedCustomer.id);
+      setApiCustomers(current => current.filter(customer => customer.id !== selectedCustomer.id));
+      setSelectedCustomerId(null);
+    } catch (err) {
+      setDrawerError(err instanceof Error ? err.message : 'No se pudo eliminar el cliente');
+    } finally {
+      setDeletingCustomer(false);
+    }
+  };
+
   const usingFallback = loadingCustomers || Boolean(customerError);
-  const customerRows = usingFallback ? demoCustomers.map(customer => ({ ...customer, id: String(customer.id) })) : apiCustomers;
+  const apiRows = apiCustomers.map(toCustomerRow);
+  const demoRows: CustomerRow[] = demoCustomers.map(customer => ({ ...customer, id: String(customer.id) }));
+  const customerRows = usingFallback ? demoRows : apiRows;
   const filtered = useMemo(() => customerRows.filter(c => `${c.name} ${c.owner} ${c.channel}`.toLowerCase().includes(query.toLowerCase())), [customerRows, query]);
   return <div className="app-shell">
     <Sidebar onLogout={onLogout} customerCount={usingFallback ? 'API' : apiCustomers.length}/>
     <div className="workspace">
       <header className="topbar"><div className="search"><span aria-hidden="true">⌕</span><input ref={searchRef} aria-label="Buscar clientes" value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar clientes…"/><kbd>Ctrl K</kbd></div><button aria-label="Notificaciones disponibles próximamente" disabled className="icon-button">♢<i/></button><span className="top-date">JUEVES, 09 JUL 2026</span></header>
       <main id="dashboard" className="main-content">
-        <section className="page-heading"><div><p className="eyebrow">Centro de operaciones</p><h1>Buen día.</h1><p>Sesión conectada a empresa <b>{session.companySlug}</b>.</p></div><button className="primary" onClick={() => { setFormError(null); setShowCustomerForm(true); }}><span>＋</span> Nuevo cliente</button></section>
+        <section className="page-heading"><div><p className="eyebrow">Centro de operaciones</p><h1>Buen día.</h1><p>Sesión conectada a empresa <b>{session.companySlug}</b>.</p></div><button className="primary" onClick={openCreateForm}><span>＋</span> Nuevo cliente</button></section>
         {customerError && <div className="toast" role="alert">No se pudo cargar la API de clientes: {customerError}. Mostrando datos de referencia visual.<button onClick={() => setCustomerError(null)}>Cerrar</button></div>}
         <section className="metrics" aria-label="Indicadores principales">{metrics.map(m => <article key={m.label} className={`metric ${m.tone}`}><p>{m.label}</p><strong>{m.label === 'CLIENTES ACTIVOS' && !usingFallback ? apiCustomers.length : m.value}</strong><small>{m.delta}</small></article>)}</section>
         <div className="dashboard-grid">
           <section className="customer-section" id="clientes">
             <div className="section-title"><div><p className="eyebrow">Cartera activa</p><h2>{loadingCustomers ? 'Cargando clientes de la API…' : 'Clientes del espacio de trabajo'}</h2></div>{query && <button className="text-button" onClick={() => setQuery('')}>Limpiar filtro</button>}</div>
             <div className="table-wrap"><table><thead><tr><th>CLIENTE</th><th>RESPONSABLE</th><th>CANAL</th><th>SALDO</th><th>PRÓXIMO VENC.</th><th>ESTADO</th><th><span className="sr-only">Acciones</span></th></tr></thead><tbody>
-              {filtered.map((c, index) => <tr key={c.id}><td><div className="customer"><span className="customer-mark">{c.initials}</span><div><b>{c.name}</b><small>CL-{String(index + 1042).padStart(4, '0')}</small></div></div></td><td>{c.owner}</td><td><span className="channel">{c.channel}</span></td><td><b>{c.currency === 'USD' ? 'US$' : '$'} {c.balance}</b><small>{c.currency}</small></td><td>{c.due}</td><td><StatusBadge status={c.alert}/></td><td><button className="row-action" aria-label={`Acciones para ${c.name}`}>···</button></td></tr>)}
+              {filtered.map((c, index) => <tr key={c.id}><td><button className="customer row-customer" onClick={() => c.apiCustomer && setSelectedCustomerId(c.id)} disabled={!c.apiCustomer}><span className="customer-mark">{c.initials}</span><span><b>{c.name}</b><small>CL-{String(index + 1042).padStart(4, '0')}</small></span></button></td><td>{c.owner}</td><td><span className="channel">{c.channel}</span></td><td><b>{c.currency === 'USD' ? 'US$' : '$'} {c.balance}</b><small>{c.currency}</small></td><td>{c.due}</td><td><StatusBadge status={c.alert}/></td><td><button className="row-action" aria-label={`Abrir ficha de ${c.name}`} onClick={() => c.apiCustomer && setSelectedCustomerId(c.id)} disabled={!c.apiCustomer}>···</button></td></tr>)}
             </tbody></table>{filtered.length === 0 && <div className="empty"><b>Sin resultados</b><p>Prueba con otro nombre, canal o responsable.</p></div>}</div>
           </section>
           <aside className="activity-rail">
             <section id="cobros" className="timeline-panel"><div className="section-title compact"><div><p className="eyebrow">Agenda de hoy</p><h2>Próximos cobros</h2></div><span className="date-tile"><b>09</b>JUL</span></div>
               <div className="timeline">{collections.map(item => <article key={item.time} className={item.state}><time>{item.time}</time><div className="timeline-marker"/><div><b>{item.name}</b><p>{item.detail}</p><button>Ver cliente →</button></div></article>)}</div>
-              <button className="secondary" onClick={() => { setFormError(null); setShowCustomerForm(true); }}>Crear cliente de agenda</button>
+              <button className="secondary" onClick={openCreateForm}>Crear cliente de agenda</button>
             </section>
             <section id="actividad" className="notes-panel"><div className="section-title compact"><div><p className="eyebrow">Equipo</p><h2>Actividad reciente</h2></div></div>{notes.map(n => <article className="note" key={n.text}><span>{n.initials}</span><div><p>{n.text}</p><time>{n.time}</time></div></article>)}</section>
           </aside>
         </div>
       </main>
     </div>
-    {showCustomerForm && <CustomerForm busy={savingCustomer} error={formError} onCancel={() => setShowCustomerForm(false)} onSubmit={saveCustomer}/>}
+    {selectedCustomer && <CustomerDrawer customer={selectedCustomer} busy={deletingCustomer} error={drawerError} onClose={() => setSelectedCustomerId(null)} onDelete={removeSelectedCustomer} onEdit={openEditForm}/>}
+    {formMode && <CustomerForm busy={savingCustomer} error={formError} initialValue={formMode === 'edit' && selectedCustomer ? toFormState(selectedCustomer) : undefined} mode={formMode} onCancel={() => setFormMode(null)} onSubmit={saveCustomer}/>}
   </div>;
 }
 
