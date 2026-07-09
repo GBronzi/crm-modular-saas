@@ -1,6 +1,6 @@
 # Seguimiento del blueprint CRM
 
-Última actualización: 4 de julio de 2026.
+Última actualización: 9 de julio de 2026.
 
 Los elementos solo se marcan como completados cuando tienen implementación y validación verificable. Una interfaz de demostración no implica que su integración con backend esté terminada.
 
@@ -29,8 +29,8 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] Roles `maestro`, `colaborador` y `solo_lectura`.
 - [x] Guard de autenticación y control de roles.
 - [x] Activación de módulos por empresa en la base de datos.
-- [ ] Administración CRUD de usuarios.
-- [ ] Interfaz conectada al login real.
+- [x] Administración CRUD básica de usuarios: listar, crear, actualizar rol/estado y revocar tokens por cambio de rol/estado.
+- [x] Interfaz conectada al login real mediante `/api/auth/login`.
 - [ ] MFA, recuperación de contraseña y rate limiting.
 - [x] Prueba integral de rotación y revocación de refresh tokens.
 - [x] Prueba de aislamiento entre dos empresas con PostgreSQL RLS.
@@ -43,7 +43,7 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] Dashboard y listado visual responsive con datos de demostración.
 - [x] Búsqueda visual y estados de alerta.
 - [ ] CRUD completo de clientes y eliminación lógica.
-- [ ] Integrar dashboard y clientes con la API.
+- [x] Integración inicial del dashboard/listado de clientes con `/api/customers`.
 - [ ] Ficha lateral: General, Financiero y Bitácora.
 - [ ] Ventas, cuotas, pagos parciales y cálculo de saldos.
 - [ ] Alertas reales de vencimiento y toggle por cliente.
@@ -65,10 +65,12 @@ Docker Desktop y PostgreSQL 16 están operativos localmente.
 - [x] TypeScript typecheck en API y frontend.
 - [x] Tres pruebas de esquemas de autenticación.
 - [x] Una prueba de renderizado del frontend.
+- [x] Dos pruebas de esquemas de usuarios.
 - [x] Build de producción de API y frontend.
 - [x] Evaluación independiente del diseño: `PASS`.
 - [x] Pruebas con PostgreSQL y Docker.
 - [x] Prueba end-to-end de empresa, sesión y clientes.
+- [x] Prueba end-to-end de administración de usuarios: maestro crea usuario y colaborador recibe 403 en `/users`.
 - [x] Stack Docker completo y migraciones idempotentes.
 - [ ] Auditoría de seguridad previa a producción.
 
