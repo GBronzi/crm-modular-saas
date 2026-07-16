@@ -19,3 +19,7 @@ export const updateCustomerSchema = customerBaseSchema.partial().strict().refine
   'Debe enviar al menos un campo para actualizar',
 );
 export const customerIdSchema = z.string().uuid();
+
+export const createCustomerNoteSchema = z.object({
+  body: z.string().trim().min(1).max(5000),
+}).strict();

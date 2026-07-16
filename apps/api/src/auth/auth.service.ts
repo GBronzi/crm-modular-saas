@@ -2,11 +2,12 @@ import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/co
 import { argon2id, hash as argonHash, verify as argonVerify } from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
+import { decryptSecret, encryptSecret, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.js';
 import type { PoolClient } from 'pg';
 import type { AuthUser, UserRole } from './auth.types.js';
 import { TenantTransactionsService } from './tenant-transactions.service.js';
 
-interface UserRow { id: string; company_id: string; password_hash: string; role: UserRole; token_version: number; active: boolean }
+interface UserRow { id: string; company_id: string; email?: string; password_hash: string; role: UserRole; token_version: number; active: boolean; mfa_enabled?: boolean; mfa_secret_encrypted?: string | null }
 interface CompanyRow { id: string; active: boolean }
 
 @Injectable()
@@ -37,13 +38,80 @@ export class AuthService {
       throw error;
     }
   }
-  async login(input: { companySlug: string; email: string; password: string }) {
+  async login(input: { companySlug: string; email: string; password: string; mfaCode?: string }) {
     const company = await this.company(input.companySlug);
     if (!company?.active) throw new UnauthorizedException('Credenciales inválidas');
     return this.db.inTenant(company.id, async (client) => {
-      const user = (await client.query<UserRow>('SELECT id,company_id,password_hash,role,token_version,active FROM users WHERE email=$1', [input.email])).rows[0];
+      const user = (await client.query<UserRow>('SELECT id,company_id,password_hash,role,token_version,active,mfa_enabled,mfa_secret_encrypted FROM users WHERE email=$1', [input.email])).rows[0];
       if (!user?.active || !(await argonVerify(user.password_hash,input.password))) throw new UnauthorizedException('Credenciales inválidas');
+      if (user.mfa_enabled) {
+        if (!input.mfaCode || !user.mfa_secret_encrypted || !verifyTotp(this.decryptMfaSecret(user.mfa_secret_encrypted), input.mfaCode)) throw new UnauthorizedException('Credenciales inválidas');
+      }
       return this.issueSession(client, { userId:user.id,companyId:user.company_id,role:user.role,tokenVersion:user.token_version });
+    });
+  }
+  async setupMfa(user: AuthUser) {
+    return this.db.inTenant(user.companyId, async (client) => {
+      const row = (await client.query<{ email: string; mfa_enabled: boolean }>('SELECT email,mfa_enabled FROM users WHERE id=$1', [user.userId])).rows[0];
+      if (!row?.email) throw new UnauthorizedException('Usuario inválido');
+      const secret = generateTotpSecret();
+      await client.query('UPDATE users SET mfa_secret_encrypted=$2,updated_at=now() WHERE id=$1', [user.userId, this.encryptMfaSecret(secret)]);
+      return { secret, otpauthUrl: otpauthUrl({ issuer: 'CRM Modular SaaS', account: row.email, secret }), enabled: row.mfa_enabled };
+    });
+  }
+
+  async enableMfa(user: AuthUser, code: string) {
+    return this.db.inTenant(user.companyId, async (client) => {
+      const row = (await client.query<{ mfa_secret_encrypted: string | null }>('SELECT mfa_secret_encrypted FROM users WHERE id=$1', [user.userId])).rows[0];
+      if (!row?.mfa_secret_encrypted || !verifyTotp(this.decryptMfaSecret(row.mfa_secret_encrypted), code)) throw new UnauthorizedException('Código MFA inválido');
+      await client.query('UPDATE users SET mfa_enabled=true,token_version=token_version+1,updated_at=now() WHERE id=$1', [user.userId]);
+      await client.query('UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=$1', [user.userId]);
+      return { enabled: true };
+    });
+  }
+
+  async disableMfa(user: AuthUser, code: string) {
+    return this.db.inTenant(user.companyId, async (client) => {
+      const row = (await client.query<{ mfa_secret_encrypted: string | null; mfa_enabled: boolean }>('SELECT mfa_secret_encrypted,mfa_enabled FROM users WHERE id=$1', [user.userId])).rows[0];
+      if (!row?.mfa_enabled || !row.mfa_secret_encrypted || !verifyTotp(this.decryptMfaSecret(row.mfa_secret_encrypted), code)) throw new UnauthorizedException('Código MFA inválido');
+      await client.query('UPDATE users SET mfa_enabled=false,mfa_secret_encrypted=NULL,token_version=token_version+1,updated_at=now() WHERE id=$1', [user.userId]);
+      await client.query('UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=$1', [user.userId]);
+      return { enabled: false };
+    });
+  }
+  async requestPasswordReset(input: { companySlug: string; email: string }) {
+    const company = await this.company(input.companySlug);
+    if (!company?.active) return this.passwordResetResponse();
+    return this.db.inTenant(company.id, async (client) => {
+      const user = (await client.query<{ id: string; active: boolean }>('SELECT id,active FROM users WHERE email=$1', [input.email])).rows[0];
+      if (!user?.active) return this.passwordResetResponse();
+      const token = randomBytes(48).toString('base64url');
+      await client.query(
+        `INSERT INTO password_reset_tokens(company_id,user_id,token_hash,expires_at)
+         VALUES ($1,$2,$3,now()+interval '30 minutes')`,
+        [company.id, user.id, this.hashToken(token)],
+      );
+      return this.passwordResetResponse(token);
+    });
+  }
+
+  async confirmPasswordReset(input: { companySlug: string; token: string; password: string }) {
+    const company = await this.company(input.companySlug);
+    if (!company?.active) throw new UnauthorizedException('Token de recuperación inválido');
+    const passwordHash = await argonHash(input.password, { type: argon2id, memoryCost: 65536, timeCost: 3, parallelism: 1 });
+    return this.db.inTenant(company.id, async (client) => {
+      const row = (await client.query<{ id: string; user_id: string }>(
+        `SELECT id,user_id
+         FROM password_reset_tokens
+         WHERE token_hash=$1 AND used_at IS NULL AND expires_at > now()
+         FOR UPDATE`,
+        [this.hashToken(input.token)],
+      )).rows[0];
+      if (!row) throw new UnauthorizedException('Token de recuperación inválido');
+      await client.query('UPDATE password_reset_tokens SET used_at=now() WHERE id=$1', [row.id]);
+      await client.query('UPDATE users SET password_hash=$2,token_version=token_version+1,updated_at=now() WHERE id=$1', [row.user_id, passwordHash]);
+      await client.query('UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=$1', [row.user_id]);
+      return { ok: true };
     });
   }
   async refresh(input: { companySlug: string; refreshToken: string }) {
@@ -77,5 +145,20 @@ export class AuthService {
     const accessToken=await new SignJWT({companyId:user.companyId,role:user.role,tokenVersion:user.tokenVersion}).setProtectedHeader({alg:'HS256'}).setSubject(user.userId).setIssuer('crm-modular-saas').setAudience('crm-api').setIssuedAt().setExpirationTime(this.accessTtl).sign(this.accessSecret);
     return { accessToken,refreshToken,expiresIn:this.accessTtl };
   }
+  private encryptMfaSecret(secret: string) {
+    return encryptSecret(secret, this.mfaKeyMaterial());
+  }
+
+  private decryptMfaSecret(secret: string) {
+    return decryptSecret(secret, this.mfaKeyMaterial());
+  }
+
+  private mfaKeyMaterial() {
+    return process.env.MFA_SECRET_ENCRYPTION_KEY ?? process.env.JWT_ACCESS_SECRET ?? 'local-development-secret-at-least-32-characters';
+  }
+  private passwordResetResponse(token?: string) {
+    return { ok: true, ...(process.env.NODE_ENV === 'production' || !token ? {} : { resetToken: token }) };
+  }
+
   private hashToken(token:string):string { return createHash('sha256').update(token).digest('hex'); }
 }
